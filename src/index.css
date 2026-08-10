@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 228 45% 3%;
+    --foreground: 210 22% 96%;
+    --card: 226 38% 5%;
+    --card-foreground: 210 22% 96%;
+    --popover: 226 38% 6%;
+    --popover-foreground: 210 22% 96%;
+    --primary: 187 95% 55%;
+    --primary-foreground: 228 45% 4%;
+    --secondary: 226 30% 11%;
+    --secondary-foreground: 210 22% 92%;
+    --muted: 226 30% 11%;
+    --muted-foreground: 217 16% 60%;
+    --accent: 226 32% 13%;
+    --accent-foreground: 210 22% 96%;
+    --destructive: 0 78% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 226 28% 14%;
+    --input: 226 28% 16%;
+    --ring: 187 95% 55%;
+    --radius: 0.9rem;
+    --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+    --font-sans: "Inter", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse 90% 55% at 50% -12%, hsl(187 95% 55% / 0.09), transparent 62%),
+      radial-gradient(ellipse 60% 40% at 88% 8%, hsl(225 90% 62% / 0.07), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: hsl(187 95% 55% / 0.32);
+    color: hsl(210 22% 98%);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(228 45% 4%);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(226 28% 18%);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(187 60% 30%);
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(226 40% 14% / 0.55) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(226 40% 14% / 0.55) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  .bg-grid-fade {
+    -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 35%, black 30%, transparent 78%);
+    mask-image: radial-gradient(ellipse 75% 75% at 50% 35%, black 30%, transparent 78%);
+  }
+
+  .text-gradient {
+    background: linear-gradient(100deg, hsl(187 95% 62%), hsl(199 90% 55%) 45%, hsl(225 95% 68%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .glass {
+    background: hsl(226 36% 8% / 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .card-hover {
+    @apply transition-all duration-300;
+  }
+  .card-hover:hover {
+    border-color: hsl(187 95% 55% / 0.45);
+    box-shadow: 0 0 0 1px hsl(187 95% 55% / 0.15), 0 18px 50px -22px hsl(187 95% 55% / 0.28);
+    transform: translateY(-3px);
+  }
+
+  .glow-dot {
+    box-shadow: 0 0 12px 2px hsl(0 84% 60% / 0.6);
+  }
+  .glow-dot-ok {
+    box-shadow: 0 0 12px 2px hsl(142 70% 50% / 0.55);
+  }
+
+  .corner-frame {
+    position: relative;
+  }
+  .corner-frame::before,
+  .corner-frame::after {
+    content: "";
+    position: absolute;
+    width: 26px;
+    height: 26px;
+    border-color: hsl(187 95% 55% / 0.8);
+    pointer-events: none;
+  }
+  .corner-frame::before {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid;
+    border-left: 2px solid;
+    border-top-left-radius: 6px;
+  }
+  .corner-frame::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid;
+    border-right: 2px solid;
+    border-bottom-right-radius: 6px;
+  }
+
+  .scanlines {
+    position: relative;
+    overflow: hidden;
+  }
+  .scanlines::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 3px,
+      hsl(0 0% 0% / 0.16) 4px
+    );
+  }
+  .scanline-bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 64px;
+    z-index: 6;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      hsl(187 95% 70% / 0.07),
+      transparent
+    );
+    animation: scan 6s linear infinite;
+  }
+
+  .noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .animate-float-slow {
+    animation: float 7s ease-in-out infinite;
+  }
+
+  .code-block {
+    @apply rounded-xl border border-border bg-[#070b12] p-4 font-mono text-[13px] leading-relaxed text-slate-300;
+  }
+
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+    mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+  }
+}
