@@ -117,56 +117,78 @@ end $$;
 -- ----------------------------------------------------------------------------
 -- Demo account
 -- demo@rtsp.me / demo123456 — pre-confirmed so sign-in works immediately.
--- If `auth.admin_create_user` is unavailable on your project, create the user
--- manually: Authentication > Users > Add user (with a password), then run the
--- sample-broadcast inserts below with that user's id.
+-- auth.admin_create_user has shipped with different argument lists on
+-- different Supabase projects, so we try the newer signature first and fall
+-- back to the classic one. Either way we then resolve the user's actual id
+-- from auth.users so the sample broadcasts always point at the right owner.
+-- If admin_create_user is unavailable altogether on your project, create the
+-- user manually (Authentication > Users > Add user) and just re-run the
+-- broadcast insert below.
 -- ----------------------------------------------------------------------------
 do $$
 begin
   if not exists (select 1 from auth.users where email = 'demo@rtsp.me') then
-    perform auth.admin_create_user(
-      'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid, -- user_id
-      'demo@rtsp.me',                                 -- email
-      null,                                           -- phone
-      'demo123456',                                   -- password
-      true,                                           -- email_confirm
-      false                                           -- phone_confirm
-    );
+    begin
+      -- Newer signature: (user_id, email, phone, password, email_confirm, phone_confirm)
+      perform auth.admin_create_user(
+        'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid, -- user_id
+        'demo@rtsp.me',                                 -- email
+        null,                                           -- phone
+        'demo123456',                                   -- password
+        true,                                           -- email_confirm
+        false                                           -- phone_confirm
+      );
+    exception when undefined_function then
+      -- Classic signature: (email, password, email_confirm)
+      perform auth.admin_create_user('demo@rtsp.me', 'demo123456', true);
+    end;
   end if;
 end $$;
 
--- Sample broadcasts for the demo account (idempotent)
+-- Sample broadcasts for the demo account (idempotent).
+-- Resolve the owner id from auth.users instead of hardcoding it, because the
+-- classic admin_create_user generates a random user id.
 insert into public.broadcasts
   (user_id, name, rtsp_url, hls_url, description, status, views, public_id)
-values
-  (
-    'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid,
-    'Warehouse entrance',
-    'rtsp://admin:demo@8.8.8.8:554/Streaming/Channels/101',
-    'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-    'Demo stream — plays a real public HLS feed so you can test the player.',
-    'online',
-    12847,
-    'WHSE1A'
-  ),
-  (
-    'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid,
-    'Parking lot',
-    'rtsp://admin:demo@8.8.8.8:554/cam/realmonitor?channel=1&subtype=0',
-    null,
-    null,
-    'offline',
-    3412,
-    'PRKLOT'
-  ),
-  (
-    'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid,
-    'Front desk',
-    'rtsp://admin:demo@8.8.8.8:9784/cameras/0/streaming/main?audio=1',
-    null,
-    null,
-    'offline',
-    976,
-    'FRNTDSK'
-  )
+select
+  u.id,
+  'Warehouse entrance',
+  'rtsp://admin:demo@8.8.8.8:554/Streaming/Channels/101',
+  'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+  'Demo stream — plays a real public HLS feed so you can test the player.',
+  'online',
+  12847,
+  'WHSE1A'
+from auth.users u
+where u.email = 'demo@rtsp.me'
+on conflict (public_id) do nothing;
+
+insert into public.broadcasts
+  (user_id, name, rtsp_url, hls_url, description, status, views, public_id)
+select
+  u.id,
+  'Parking lot',
+  'rtsp://admin:demo@8.8.8.8:554/cam/realmonitor?channel=1&subtype=0',
+  null,
+  null,
+  'offline',
+  3412,
+  'PRKLOT'
+from auth.users u
+where u.email = 'demo@rtsp.me'
+on conflict (public_id) do nothing;
+
+insert into public.broadcasts
+  (user_id, name, rtsp_url, hls_url, description, status, views, public_id)
+select
+  u.id,
+  'Front desk',
+  'rtsp://admin:demo@8.8.8.8:9784/cameras/0/streaming/main?audio=1',
+  null,
+  null,
+  'offline',
+  976,
+  'FRNTDSK'
+from auth.users u
+where u.email = 'demo@rtsp.me'
 on conflict (public_id) do nothing;
