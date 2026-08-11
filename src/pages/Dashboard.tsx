@@ -1,7 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "convex/react";
-import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { toast } from "sonner";
 import {
   Camera,
@@ -18,7 +16,6 @@ import {
   Trash2,
   Video,
 } from "lucide-react";
-import { api } from "../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -44,7 +41,20 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/lib/supabase";
+import {
+  listMyBroadcasts,
+  createBroadcast,
+  updateBroadcast,
+  setBroadcastStatus,
+  deleteBroadcast,
+  subscribeToBroadcastChanges,
+  seedDemoBroadcasts,
+  type Broadcast,
+} from "@/lib/broadcasts";
 import { formatNumber, timeAgo } from "@/lib/utils";
+import { DEMO_EMAIL } from "@/lib/demo";
 
 function embedCode(publicId: string) {
   const origin = window.location.origin;
@@ -61,20 +71,16 @@ function copyText(text: string, message: string) {
 function BroadcastForm({
   open,
   onOpenChange,
+  userId,
   initial,
+  onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  initial?: {
-    _id: string;
-    name: string;
-    rtspUrl: string;
-    hlsUrl?: string;
-    description?: string;
-  };
+  userId: string;
+  initial?: Broadcast;
+  onSaved: () => void;
 }) {
-  const create = useMutation(api.broadcasts.create);
-  const update = useMutation(api.broadcasts.update);
   const [busy, setBusy] = useState(false);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -91,16 +97,17 @@ function BroadcastForm({
     setBusy(true);
     try {
       if (initial) {
-        await update({ id: initial._id as never, ...payload });
+        await updateBroadcast(initial.id, payload);
         toast.success("Broadcast updated");
       } else {
-        await create(payload);
+        await createBroadcast({ userId, ...payload });
         toast.success("Broadcast created", {
           description: "Paste the embed code into your website to go live.",
         });
       }
       onOpenChange(false);
       form.reset();
+      onSaved();
     } catch (err) {
       toast.error("Something went wrong", {
         description: err instanceof Error ? err.message : "Please try again.",
@@ -150,7 +157,7 @@ function BroadcastForm({
               id="hlsUrl"
               name="hlsUrl"
               placeholder="https://…/stream.m3u8"
-              defaultValue={initial?.hlsUrl}
+              defaultValue={initial?.hlsUrl ?? ""}
               className="font-mono text-xs"
             />
           </div>
@@ -161,7 +168,7 @@ function BroadcastForm({
               name="description"
               rows={3}
               placeholder="Where is this camera, what does it cover…"
-              defaultValue={initial?.description}
+              defaultValue={initial?.description ?? ""}
             />
           </div>
           <DialogFooter>
@@ -181,24 +188,58 @@ function BroadcastForm({
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { signOut } = useAuthActions();
-  const { isAuthenticated, isLoading } = useConvexAuth();
+  const { user, loading: authLoading } = useAuth();
+  const [broadcasts, setBroadcasts] = useState<Broadcast[] | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const user = useQuery(api.users.viewer);
-  const broadcasts = useQuery(api.broadcasts.listMine);
-  const setStatus = useMutation(api.broadcasts.setStatus);
-  const remove = useMutation(api.broadcasts.remove);
+  const userId = user?.id ?? null;
+
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  // Load the user's broadcasts; refetch when they change (CRUD + realtime).
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    (async () => {
+      try {
+        const rows = await listMyBroadcasts(userId);
+        if (active) setBroadcasts(rows);
+      } catch (err) {
+        if (active) {
+          toast.error("Couldn't load broadcasts", {
+            description: err instanceof Error ? err.message : "Please try again.",
+          });
+          setBroadcasts([]);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [userId, refreshKey]);
+
+  // Live updates via Supabase Realtime.
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeToBroadcastChanges(userId, refresh);
+  }, [userId, refresh]);
+
+  // First time the demo account opens the dashboard, seed sample broadcasts
+  // (the migration usually does this — this is the fallback).
+  useEffect(() => {
+    if (user?.email === DEMO_EMAIL && userId && broadcasts && broadcasts.length === 0) {
+      seedDemoBroadcasts(userId)
+        .then(refresh)
+        .catch(() => {
+          /* retry on next mount if it fails */
+        });
+    }
+  }, [user, userId, broadcasts, refresh]);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<{
-    _id: string;
-    name: string;
-    rtspUrl: string;
-    hlsUrl?: string;
-    description?: string;
-  } | null>(null);
+  const [editing, setEditing] = useState<Broadcast | null>(null);
 
-  if (isLoading) {
+  if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-8 animate-spin text-primary" />
@@ -206,22 +247,23 @@ export default function Dashboard() {
     );
   }
 
-  if (!isAuthenticated) return null;
+  if (!user) return null;
 
-  const loading = broadcasts === undefined || user === undefined;
+  const loading = broadcasts === null;
   const list = broadcasts ?? [];
   const onlineCount = list.filter((b) => b.status === "online").length;
   const totalViews = list.reduce((acc, b) => acc + b.views, 0);
 
   const onSignOut = async () => {
-    await signOut();
+    await supabase.auth.signOut();
     navigate("/");
   };
 
   const toggleStatus = async (id: string, current: "online" | "offline") => {
+    const next = current === "online" ? "offline" : "online";
     try {
-      await setStatus({ id: id as never, status: current === "online" ? "offline" : "online" });
-      toast.success(current === "online" ? "Broadcast paused" : "Broadcast is now online");
+      await setBroadcastStatus(id, next);
+      toast.success(next === "online" ? "Broadcast is now online" : "Broadcast paused");
     } catch {
       toast.error("Couldn't update the broadcast");
     }
@@ -243,7 +285,7 @@ export default function Dashboard() {
           </Link>
 
           <div className="flex items-center gap-3">
-            {user?.email && (
+            {user.email && (
               <span className="hidden max-w-[220px] truncate font-mono text-xs text-muted-foreground md:block">
                 {user.email}
               </span>
@@ -270,12 +312,19 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex gap-3">
-            <BroadcastForm open={formOpen} onOpenChange={setFormOpen} />
+            <BroadcastForm
+              open={formOpen}
+              onOpenChange={setFormOpen}
+              userId={user.id}
+              onSaved={refresh}
+            />
             {editing && (
               <BroadcastForm
                 open={editing !== null}
                 onOpenChange={(o) => !o && setEditing(null)}
+                userId={user.id}
                 initial={editing}
+                onSaved={refresh}
               />
             )}
             <Button onClick={() => setFormOpen(true)}>
@@ -330,14 +379,14 @@ export default function Dashboard() {
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {list.map((b) => (
               <div
-                key={b._id}
+                key={b.id}
                 className="card-hover group flex flex-col rounded-xl border border-border bg-card p-6"
               >
                 <div className="mb-4 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="truncate font-display text-lg font-semibold">{b.name}</h3>
                     <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                      {b.publicId} · {timeAgo(b.createdAt)}
+                      {b.publicId} · {timeAgo(new Date(b.createdAt).getTime())}
                     </p>
                   </div>
                   <Badge variant={b.status === "online" ? "success" : "secondary"}>
@@ -367,7 +416,7 @@ export default function Dashboard() {
                   <Button
                     size="sm"
                     variant={b.status === "online" ? "outline" : "default"}
-                    onClick={() => toggleStatus(b._id, b.status)}
+                    onClick={() => toggleStatus(b.id, b.status)}
                   >
                     {b.status === "online" ? <PowerOff /> : <Power />}
                     {b.status === "online" ? "Pause" : "Go live"}
@@ -409,7 +458,7 @@ export default function Dashboard() {
                           className="bg-destructive text-white hover:bg-destructive/90"
                           onClick={async () => {
                             try {
-                              await remove({ id: b._id as never });
+                              await deleteBroadcast(b.id);
                               toast.success("Broadcast deleted");
                             } catch {
                               toast.error("Couldn't delete the broadcast");

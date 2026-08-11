@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useConvexAuth } from "@convex-dev/auth/react";
+import { useAuth } from "@/lib/auth-context";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,8 @@ function Brand() {
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const { isAuthenticated, isLoading } = useConvexAuth();
+  const { user, loading } = useAuth();
+  const isAuthenticated = Boolean(user);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -64,7 +65,7 @@ export default function Navbar() {
         </div>
 
         <div className="hidden items-center gap-3 lg:flex">
-          {isLoading ? null : isAuthenticated ? (
+          {loading ? null : isAuthenticated ? (
             <Button size="sm" onClick={() => navigate("/dashboard")}>
               My broadcasts
             </Button>
