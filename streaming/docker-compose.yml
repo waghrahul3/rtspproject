@@ -1,0 +1,46 @@
+# One-command streaming environment: Mediamtx (RTSP -> HLS) + the auto-HLS
+# provisioning service (streams/server.ts).
+#
+#   docker compose up -d
+#
+# That's it: the dashboard's auto-HLS mode now has everything it needs.
+# Point the app at the service with:
+#   VITE_STREAMS_API_URL=http://localhost:4000
+# (set in the API Keys panel / .env.local — see streaming/README.md).
+#
+# Ports:
+#   :4000  streams service (auto-HLS API — this is what the app calls)
+#   :8888  HLS playlists     http://localhost:8888/<path>/index.m3u8
+#   :9997  Mediamtx HTTP API (internal wiring only)
+#
+# For the HTTPS preview link (browser mixed-content rule), set HLS_BASE_URL to
+# your HTTPS tunnel/domain, e.g.:
+#   HLS_BASE_URL=https://hls.yourdomain.com docker compose up -d
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.20.0
+    container_name: rtspme-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8888:8888" # HLS
+      - "9997:9997" # HTTP API
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml
+
+  streams:
+    image: oven/bun:1
+    container_name: rtspme-streams
+    restart: unless-stopped
+    depends_on:
+      - mediamtx
+    working_dir: /app
+    volumes:
+      - ../:/app # repo root, so streams/server.ts is available
+    command: bun streams/server.ts
+    environment:
+      MEDIAMTX_URL: http://mediamtx:9997
+      HLS_BASE_URL: ${HLS_BASE_URL:-http://localhost:8888}
+      PORT: "4000"
+    ports:
+      - "4000:4000"

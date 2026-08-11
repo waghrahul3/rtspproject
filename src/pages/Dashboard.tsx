@@ -13,6 +13,7 @@ import {
   Power,
   PowerOff,
   Radio,
+  Sparkles,
   Trash2,
   Video,
 } from "lucide-react";
@@ -53,8 +54,9 @@ import {
   seedDemoBroadcasts,
   type Broadcast,
 } from "@/lib/broadcasts";
-import { formatNumber, timeAgo } from "@/lib/utils";
+import { cn, formatNumber, timeAgo } from "@/lib/utils";
 import { DEMO_EMAIL } from "@/lib/demo";
+import { getStreamStatus, isStreamsConfigured } from "@/lib/streams";
 
 function embedCode(publicId: string) {
   const origin = window.location.origin;
@@ -100,9 +102,12 @@ function BroadcastForm({
         await updateBroadcast(initial.id, payload);
         toast.success("Broadcast updated");
       } else {
-        await createBroadcast({ userId, ...payload });
+        const created = await createBroadcast({ userId, ...payload });
         toast.success("Broadcast created", {
-          description: "Paste the embed code into your website to go live.",
+          description:
+            created.hlsUrl && isStreamsConfigured
+              ? "HLS preview generated automatically — hit Go live to start streaming."
+              : "Paste the embed code into your website to go live.",
         });
       }
       onOpenChange(false);
@@ -123,8 +128,17 @@ function BroadcastForm({
         <DialogHeader>
           <DialogTitle>{initial ? "Edit broadcast" : "New broadcast"}</DialogTitle>
           <DialogDescription>
-            Paste the RTSP link from your camera. Add an HLS link only if you
-            want a live preview player on the public page.
+            {isStreamsConfigured ? (
+              <>
+                Paste the RTSP link from your camera — the HLS preview link is
+                generated automatically. Add one manually only to override it.
+              </>
+            ) : (
+              <>
+                Paste the RTSP link from your camera. Add an HLS link only if
+                you want a live preview player on the public page.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -186,11 +200,50 @@ function BroadcastForm({
   );
 }
 
+function StreamHealthChip({
+  publicId,
+  health,
+  reachable,
+}: {
+  publicId: string;
+  health: Record<string, boolean> | null;
+  reachable: boolean | null;
+}) {
+  if (reachable === false) {
+    return (
+      <div className="mb-4 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-slate-500" />
+        Stream service offline
+      </div>
+    );
+  }
+  const ready = health?.[publicId];
+  if (ready === undefined) return null;
+  return (
+    <div className="mb-4 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest">
+      {ready ? (
+        <>
+          <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+          <span className="text-emerald-400">Stream connected</span>
+        </>
+      ) : (
+        <>
+          <span className="size-1.5 animate-pulse rounded-full bg-amber-400" />
+          <span className="text-amber-400/90">Waiting for camera</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
   const [broadcasts, setBroadcasts] = useState<Broadcast[] | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Per-broadcast stream health from the auto-HLS service (publicId -> ready).
+  const [streamHealth, setStreamHealth] = useState<Record<string, boolean> | null>(null);
+  const [streamsReachable, setStreamsReachable] = useState<boolean | null>(null);
 
   const userId = user?.id ?? null;
 
@@ -223,6 +276,36 @@ export default function Dashboard() {
     if (!userId) return;
     return subscribeToBroadcastChanges(userId, refresh);
   }, [userId, refresh]);
+
+  // Poll the streams service for per-broadcast health (only when configured).
+  useEffect(() => {
+    if (!isStreamsConfigured || !broadcasts || broadcasts.length === 0) {
+      setStreamHealth(null);
+      setStreamsReachable(null);
+      return;
+    }
+    let active = true;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const poll = async () => {
+      const results = await Promise.all(
+        broadcasts.map((b) => getStreamStatus(b.publicId)),
+      );
+      if (!active) return;
+      setStreamsReachable(results.some((r) => r !== null));
+      const map: Record<string, boolean> = {};
+      broadcasts.forEach((b, i) => {
+        const r = results[i];
+        if (r) map[b.publicId] = r.ready;
+      });
+      setStreamHealth(map);
+    };
+    poll();
+    timer = setInterval(poll, 15_000);
+    return () => {
+      active = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [isStreamsConfigured, broadcasts]);
 
   // First time the demo account opens the dashboard, seed sample broadcasts
   // (the migration usually does this — this is the fallback).
@@ -302,6 +385,19 @@ export default function Dashboard() {
         {/* heading + stats */}
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
+            {isStreamsConfigured && (
+              <span
+                className={cn(
+                  "mb-2 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-[10px] uppercase tracking-widest",
+                  streamsReachable === false
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                    : "border-primary/30 bg-primary/10 text-primary",
+                )}
+              >
+                <Sparkles className="size-3" />
+                {streamsReachable === false ? "Auto-HLS · service offline" : "Auto-HLS on"}
+              </span>
+            )}
             <h1 className="font-display text-3xl font-bold tracking-tight">
               My broadcasts
             </h1>
@@ -366,8 +462,9 @@ export default function Dashboard() {
             <div>
               <h3 className="font-display text-xl font-semibold">No broadcasts yet</h3>
               <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-                Create your first broadcast by pasting an RTSP link — you'll get
-                the embed code for your website right away.
+                {isStreamsConfigured
+                  ? "Paste an RTSP link from your camera — the HLS preview is generated automatically and you'll get the embed code right away."
+                  : "Paste an RTSP link from your camera and you'll get the embed code for your website right away."}
               </p>
             </div>
             <Button onClick={() => setFormOpen(true)}>
@@ -404,6 +501,30 @@ export default function Dashboard() {
                 <div className="mb-4 truncate rounded-md border border-border/70 bg-[#070b12] px-3 py-2 font-mono text-[11px] text-cyan-200/70">
                   {b.rtspUrl}
                 </div>
+
+                {b.hlsUrl && (
+                  <div className="mb-4 flex items-center gap-2 rounded-md border border-border/70 bg-[#070b12] px-3 py-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-emerald-300/70">
+                      {b.hlsUrl}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => copyText(b.hlsUrl ?? "", "HLS link copied")}
+                      className="shrink-0 text-muted-foreground transition-colors hover:text-primary"
+                      title="Copy HLS link"
+                    >
+                      <Copy className="size-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {isStreamsConfigured && b.hlsUrl && (
+                  <StreamHealthChip
+                    publicId={b.publicId}
+                    health={streamHealth}
+                    reachable={streamsReachable}
+                  />
+                )}
 
                 <div className="mb-5 flex items-center gap-4 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5">
@@ -458,7 +579,7 @@ export default function Dashboard() {
                           className="bg-destructive text-white hover:bg-destructive/90"
                           onClick={async () => {
                             try {
-                              await deleteBroadcast(b.id);
+                              await deleteBroadcast(b.id, b.publicId);
                               toast.success("Broadcast deleted");
                             } catch {
                               toast.error("Couldn't delete the broadcast");
