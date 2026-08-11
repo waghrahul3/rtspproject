@@ -117,30 +117,82 @@ end $$;
 -- ----------------------------------------------------------------------------
 -- Demo account
 -- demo@rtsp.me / demo123456 — pre-confirmed so sign-in works immediately.
--- auth.admin_create_user has shipped with different argument lists on
--- different Supabase projects, so we try the newer signature first and fall
--- back to the classic one. Either way we then resolve the user's actual id
--- from auth.users so the sample broadcasts always point at the right owner.
--- If admin_create_user is unavailable altogether on your project, create the
--- user manually (Authentication > Users > Add user) and just re-run the
--- broadcast insert below.
+-- auth.admin_create_user does not exist on every project (it's absent from
+-- the auth migrations of current Supabase builds), and its argument list has
+-- changed over time. So we cascade: 6-arg admin helper -> classic 3-arg
+-- helper -> direct insert into auth.users + auth.identities, which is the
+-- classic approach that works on any standard auth schema (old and new).
+-- The user's real id is resolved from auth.users afterwards, so the sample
+-- broadcasts always point at the right owner.
 -- ----------------------------------------------------------------------------
 do $$
+declare
+  v_user_id uuid := 'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid;
 begin
   if not exists (select 1 from auth.users where email = 'demo@rtsp.me') then
     begin
-      -- Newer signature: (user_id, email, phone, password, email_confirm, phone_confirm)
+      -- 1) Newer admin helper: (user_id, email, phone, password, email_confirm, phone_confirm)
       perform auth.admin_create_user(
-        'b23e9b7e-2f3d-4c7a-9a5e-0c1d2e3f4a5b'::uuid, -- user_id
-        'demo@rtsp.me',                                 -- email
-        null,                                           -- phone
-        'demo123456',                                   -- password
-        true,                                           -- email_confirm
-        false                                           -- phone_confirm
+        v_user_id, 'demo@rtsp.me', null, 'demo123456', true, false
       );
     exception when undefined_function then
-      -- Classic signature: (email, password, email_confirm)
-      perform auth.admin_create_user('demo@rtsp.me', 'demo123456', true);
+      begin
+        -- 2) Classic admin helper: (email, password, email_confirm)
+        perform auth.admin_create_user('demo@rtsp.me', 'demo123456', true);
+      exception when undefined_function then
+        -- 3) No admin helper on this project — create the rows directly.
+        insert into auth.users (
+          instance_id, id, aud, role, email, encrypted_password,
+          email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+          created_at, updated_at
+        ) values (
+          '00000000-0000-0000-0000-000000000000',
+          v_user_id,
+          'authenticated',
+          'authenticated',
+          'demo@rtsp.me',
+          extensions.crypt('demo123456', extensions.gen_salt('bf')),
+          now(),
+          '{"provider":"email","providers":["email"]}',
+          '{}',
+          now(),
+          now()
+        );
+        -- Link the email identity (schema differs across auth versions).
+        begin
+          -- New schema: provider_id (text) + id (uuid, defaulted)
+          insert into auth.identities (
+            provider_id, user_id, identity_data, provider,
+            last_sign_in_at, created_at, updated_at
+          ) values (
+            v_user_id::text,
+            v_user_id,
+            jsonb_build_object(
+              'sub', v_user_id::text,
+              'email', 'demo@rtsp.me',
+              'email_verified', true
+            ),
+            'email',
+            now(), now(), now()
+          );
+        exception when undefined_column then
+          -- Old schema: id (text) primary key
+          insert into auth.identities (
+            id, user_id, identity_data, provider,
+            last_sign_in_at, created_at, updated_at
+          ) values (
+            v_user_id::text,
+            v_user_id,
+            jsonb_build_object(
+              'sub', v_user_id::text,
+              'email', 'demo@rtsp.me',
+              'email_verified', true
+            ),
+            'email',
+            now(), now(), now()
+          );
+        end;
+      end;
     end;
   end if;
 end $$;
