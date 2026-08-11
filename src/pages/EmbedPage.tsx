@@ -1,24 +1,47 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useMutation, useQuery } from "convex/react";
 import { Eye, Loader2, SearchX } from "lucide-react";
-import { api } from "../convex/_generated/api";
 import CameraFeed from "@/components/site/CameraFeed";
 import { CopyButton } from "@/components/site/shared";
 import { formatNumber } from "@/lib/utils";
+import { getPublicBroadcast, incrementBroadcastView, type PublicBroadcast } from "@/lib/broadcasts";
 
 export default function EmbedPage() {
   const { publicId } = useParams<{ publicId: string }>();
-  const broadcast = useQuery(api.broadcasts.getByPublicId, {
-    publicId: publicId ?? "",
-  });
-  const recordView = useMutation(api.broadcasts.recordView);
+  const [broadcast, setBroadcast] = useState<PublicBroadcast | null | undefined>(undefined);
+  const [views, setViews] = useState(0);
+  const countedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (broadcast && broadcast.status === "online" && publicId) {
-      recordView({ publicId });
-    }
-  }, [broadcast, publicId, recordView]);
+    if (!publicId) return;
+    let active = true;
+    setBroadcast(undefined);
+    getPublicBroadcast(publicId)
+      .then((row) => {
+        if (!active) return;
+        setBroadcast(row);
+        setViews(row?.views ?? 0);
+      })
+      .catch(() => {
+        if (active) setBroadcast(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [publicId]);
+
+  // Count each view once per page load (Supabase Realtime is not needed here;
+  // the embed page is static and lightweight).
+  useEffect(() => {
+    if (!publicId || !broadcast || broadcast.status !== "online") return;
+    if (countedRef.current === publicId) return;
+    countedRef.current = publicId;
+    incrementBroadcastView(publicId)
+      .then(() => setViews((v) => v + 1))
+      .catch(() => {
+        /* view counting is best-effort */
+      });
+  }, [publicId, broadcast]);
 
   const shareUrl = `${window.location.origin}/embed/${publicId}/`;
 
@@ -53,8 +76,8 @@ export default function EmbedPage() {
               <CameraFeed
                 title={broadcast.name || broadcast.publicId}
                 status={broadcast.status}
-                hlsUrl={broadcast.hlsUrl}
-                views={broadcast.views}
+                hlsUrl={broadcast.hlsUrl ?? undefined}
+                views={views}
                 className="aspect-[4/3] w-full"
               />
             </div>
@@ -68,7 +91,7 @@ export default function EmbedPage() {
                   <span className="font-mono">{broadcast.publicId}</span>
                   <span className="flex items-center gap-1.5">
                     <Eye className="size-3.5 text-primary" />
-                    {formatNumber(broadcast.views)} views
+                    {formatNumber(views)} views
                   </span>
                   {broadcast.description && (
                     <span className="truncate">{broadcast.description}</span>

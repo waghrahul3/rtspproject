@@ -1,16 +1,14 @@
 import { useState, type FormEvent } from "react";
-import { useMutation } from "convex/react";
 import { toast } from "sonner";
 import { Mail, MapPin, MessageSquare, Send, Loader2 } from "lucide-react";
-import { api } from "../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Reveal, SectionHeading } from "@/components/site/shared";
+import { sendContactMessage } from "@/lib/broadcasts";
 
 function ContactForm() {
-  const sendMessage = useMutation(api.contacts.sendMessage);
   const [sending, setSending] = useState(false);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -26,7 +24,7 @@ function ContactForm() {
 
     setSending(true);
     try {
-      await sendMessage(payload);
+      await sendContactMessage(payload);
       toast.success("Message sent", {
         description: "We'll get back to you within one business day.",
       });

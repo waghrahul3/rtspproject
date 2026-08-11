@@ -10,6 +10,11 @@ export default defineConfig({
     },
   },
   server: {
+    // Bind to all interfaces and honor the port Freebuff injects for the
+    // isolated workspace preview. HMR stays disabled (Freebuff requirement).
+    // The app talks to Supabase (cloud or local) directly — no proxy needed.
+    host: "0.0.0.0",
+    port: Number(process.env.PORT) || 5173,
     hmr: false,
   },
 });
