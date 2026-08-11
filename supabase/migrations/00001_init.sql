@@ -141,9 +141,17 @@ begin
         perform auth.admin_create_user('demo@rtsp.me', 'demo123456', true);
       exception when undefined_function then
         -- 3) No admin helper on this project — create the rows directly.
+        -- NB: the auth service scans these token columns into non-nullable
+        -- strings, so they MUST be empty strings, never NULL (a NULL makes
+        -- sign-in fail with "converting NULL to string is unsupported").
         insert into auth.users (
           instance_id, id, aud, role, email, encrypted_password,
-          email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+          email_confirmed_at,
+          confirmation_token, recovery_token,
+          email_change_token_current, email_change_token_new, email_change,
+          email_change_confirm_status,
+          phone_change_token, phone_change, reauthentication_token,
+          raw_app_meta_data, raw_user_meta_data,
           created_at, updated_at
         ) values (
           '00000000-0000-0000-0000-000000000000',
@@ -153,6 +161,7 @@ begin
           'demo@rtsp.me',
           extensions.crypt('demo123456', extensions.gen_salt('bf')),
           now(),
+          '', '', '', '', '', 0, '', '', '',
           '{"provider":"email","providers":["email"]}',
           '{}',
           now(),
