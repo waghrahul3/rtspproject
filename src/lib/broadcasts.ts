@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { isStreamsConfigured, provisionStream, removeStream } from "./streams";
 
 export interface Broadcast {
   id: string;
@@ -127,6 +128,7 @@ export async function createBroadcast(input: {
 
   // Public ids are unique (DB index). On the rare collision, retry.
   for (let attempt = 0; attempt < 3; attempt++) {
+    const publicId = generatePublicId();
     const { data, error } = await supabase
       .from("broadcasts")
       .insert({
@@ -137,11 +139,26 @@ export async function createBroadcast(input: {
         description,
         status: "offline",
         views: 0,
-        public_id: generatePublicId(),
+        public_id: publicId,
       })
       .select("*")
       .single();
-    if (!error) return mapBroadcastRow(data as Record<string, unknown>);
+    if (!error) {
+      const row = data as Record<string, unknown>;
+      // Auto-HLS: if the streams service is configured, provision an HLS
+      // stream for the RTSP URL and save the generated link.
+      if (isStreamsConfigured && !row.hls_url) {
+        const generated = await provisionStream(publicId, rtspUrl).catch(() => null);
+        if (generated) {
+          const { error: updateError } = await supabase
+            .from("broadcasts")
+            .update({ hls_url: generated })
+            .eq("id", row.id);
+          if (!updateError) row.hls_url = generated;
+        }
+      }
+      return mapBroadcastRow(row);
+    }
     if (error.code !== "23505") throw error;
   }
   throw new Error("Couldn't allocate a unique broadcast id — please try again");
@@ -176,10 +193,11 @@ export async function setBroadcastStatus(
   if (error) throw error;
 }
 
-export async function deleteBroadcast(id: string): Promise<void> {
+export async function deleteBroadcast(id: string, publicId?: string): Promise<void> {
   requireConfigured();
   const { error } = await supabase.from("broadcasts").delete().eq("id", id);
   if (error) throw error;
+  if (publicId) await removeStream(publicId);
 }
 
 /** Live refresh: fires `onChange` whenever this user's broadcasts change. */

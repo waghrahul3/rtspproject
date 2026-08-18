@@ -11,7 +11,7 @@
     "moduleDetection": "force",
     "noEmit": true,
     "strict": true,
-    "types": ["node"]
+    "types": ["node", "bun"]
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "streams"]
 }
